@@ -1,52 +1,85 @@
-# Supports building Go services, setting up Python venv, and running tests.
+# Makefile for the Web Crawler That Dreams project
 
-APP_NAME=webcrawler-dream
+# --- Variables ---
 GO_CMD=go
 PYTHON=python3
 PIP=$(PYTHON) -m pip
-VENV_DIR=python-ml/venv
 
-.PHONY: all go-build go-run py-venv py-install py-run clean docker-build docker-up docker-down test
+# Service Directories
+GO_ROOT=go-backend
+PY_ROOT=py-ml-service
+VENV_DIR=$(PY_ROOT)/.venv
 
-all: go-build py-install
+# Binaries
+BINS=crawler indexer orchestrator content-processor api
+GO_BINS=$(patsubst %,bin/%,$(BINS))
 
-## Go targets ##
-go-build:
-	cd crawler && $(GO_CMD) build -o ../bin/crawler
-	cd orchestrator && $(GO_CMD) build -o ../bin/orchestrator
-	cd storage && $(GO_CMD) build -o ../bin/storage
+.DEFAULT_GOAL := help
 
-go-run:
-	cd orchestrator && $(GO_CMD) run main.go
+# --- Docker Commands ---
+up: ## Build and start all services with Docker Compose
+	docker-compose up --build -d
 
-## Python targets ##
-py-venv:
-	test -d $(VENV_DIR) || $(PYTHON) -m venv $(VENV_DIR)
-
-py-install: py-venv
-	$(VENV_DIR)/bin/$(PIP) install -r python-ml/requirements.txt
-
-py-run:
-	$(VENV_DIR)/bin/python python-ml/service.py
-
-## Docker targets ##
-docker-build:
-	docker-compose build
-
-docker-up:
-	docker-compose up -d
-
-docker-down:
+down: ## Stop and remove all Docker Compose services
 	docker-compose down
 
-## Tests ##
-test:
-	cd crawler && $(GO_CMD) test ./...
-	cd orchestrator && $(GO_CMD) test ./...
-	cd storage && $(GO_CMD) test ./...
-	$(VENV_DIR)/bin/python -m pytest python-ml/tests
+logs: ## Follow logs from all running services
+	docker-compose logs -f
 
-## Clean ##
-clean:
-	rm -rf bin/
+# --- Build Commands ---
+build: go-build py-install ## Build all binaries and install Python dependencies
+
+go-build: $(GO_BINS) ## Build all Go binaries into ./bin
+
+# This rule builds a binary like 'bin/crawler' from a source like './go-backend/cmd/crawler/'
+bin/%:
+	@echo "Building Go binary: $@"
+	@mkdir -p bin
+	$(GO_CMD) build -v -o $@ ./$(GO_ROOT)/cmd/$*
+
+py-install: $(VENV_DIR)/touchfile ## Install Python dependencies into a virtualenv
+	@echo "Python dependencies are up to date."
+
+$(VENV_DIR)/touchfile: $(PY_ROOT)/requirements.txt
+	test -d $(VENV_DIR) || $(PYTHON) -m venv $(VENV_DIR)
+	$(VENV_DIR)/bin/$(PIP) install -r $(PY_ROOT)/requirements.txt
+	touch $@
+
+# --- Test Commands ---
+test: test-go test-py ## Run all tests
+
+test-go: ## Run Go unit tests
+	cd $(GO_ROOT) && $(GO_CMD) test ./...
+
+test-py: ## Run Python unit tests
+	$(VENV_DIR)/bin/python -m pytest $(PY_ROOT)/
+
+# --- Run Commands ---
+run-go-crawler: ## Run Go crawler service
+	./bin/crawler
+
+run-go-orchestrator: ## Run Go orchestrator service
+	./bin/orchestrator
+
+run-go-indexer: ## Run Go indexer service
+	./bin/indexer
+
+run-go-content-processor: ## Run Go content processor service
+	./bin/content-processor
+
+run-go-api: ## Run Go REST API service
+	./bin/api
+
+run-py-service: ## Run Python ML service
+	cd $(PY_ROOT) && $(VENV_DIR)/bin/python api.py
+
+# --- Cleanup ---
+clean: ## Remove built artifacts and virtual environment
+	rm -rf bin
 	rm -rf $(VENV_DIR)
+	@echo "Cleanup complete."
+
+# --- Help ---
+.PHONY: help
+help: ## Display this help screen
+	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-20s\033[0m %s\n", $$1, $$2}'
