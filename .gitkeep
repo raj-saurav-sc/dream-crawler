@@ -1,0 +1,3 @@
+# This directory is for storing large ML model files.
+# Models are not checked into Git but are mounted into Docker containers.
+# Run 'make setup' to fetch the default model.
